@@ -133,7 +133,7 @@ async def handle_voice(message: Message):
 
     try:
         completion = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1
         )
