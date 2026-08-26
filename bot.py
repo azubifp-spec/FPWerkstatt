@@ -2,25 +2,23 @@ import os
 import json
 import asyncio
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from groq import Groq
 import gspread
 from google.oauth2.service_account import Credentials
 
-# === Настройки (будут браться из переменных окружения) ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SHEET_NAME = os.getenv("SHEET_NAME", "Учёт работ автомастерской")
 
-# Инициализация
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-# Хранилище временных данных пользователей
+# Временное хранилище данных пользователей
 user_data = {}
 
 def get_sheet():
@@ -33,15 +31,27 @@ def get_sheet():
     client = gspread.authorize(creds)
     return client.open(SHEET_NAME).sheet1
 
+# Клавиатура Да/Нет
+yes_no_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]
+    ],
+    resize_keyboard=True
+)
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
+    user_id = message.from_user.id
+    user_data[user_id] = {"step": "mechaniker"}
     await message.answer(
-        "Здравствуйте!\n\n"
-        "Я бот для учёта выполненных работ.\n"
-        "Напишите ваше имя и фамилию одним сообщением.\n"
-        "Например: Крупчан Сергей"
+        "Введите Ваше Имя и Фамилию\n"
+        "Bitte geben Sie Ihren Vor- und Nachnamen ein:",
+        reply_markup=ReplyKeyboardRemove()
     )
-    user_data[message.from_user.id] = {"step": "waiting_name"}
+
+@dp.message(Command("new"))
+async def cmd_new(message: Message):
+    await cmd_start(message)
 
 @dp.message(F.text)
 async def handle_text(message: Message):
@@ -49,24 +59,92 @@ async def handle_text(message: Message):
     text = message.text.strip()
 
     if user_id not in user_data:
-        await message.answer("Нажмите /start чтобы начать.")
+        await message.answer("Нажмите /start чтобы начать новую запись.")
         return
 
-    if user_data[user_id].get("step") == "waiting_name":
-        user_data[user_id]["name"] = text
-        user_data[user_id]["step"] = "ready"
+    step = user_data[user_id].get("step")
+
+    # --- Шаг 1: Имя ---
+    if step == "mechaniker":
+        user_data[user_id]["mechaniker"] = text
+        user_data[user_id]["step"] = "datum"
         await message.answer(
-            f"Отлично, {text}!\n\n"
-            "Теперь просто отправьте голосовое сообщение о выполненной работе.\n"
-            "Говорите на русском."
+            "Введите дату выполненных работ (ДД.ММ.ГГГГ)\n"
+            "или напишите «сегодня»\n\n"
+            "Bitte geben Sie das Datum ein (TT.MM.JJJJ)\n"
+            "oder schreiben Sie «heute»:"
         )
         return
 
-    if user_data[user_id].get("step") == "confirm":
-        if text.lower() in ["да", "yes", "верно", "ок", "ok"]:
+    # --- Шаг 2: Дата ---
+    if step == "datum":
+        if text.lower() in ["сегодня", "heute", "сегодняшняя", "today"]:
+            date_str = datetime.now().strftime("%d.%m.%Y")
+        else:
+            date_str = text
+        user_data[user_id]["datum"] = date_str
+        user_data[user_id]["step"] = "fahrzeug"
+        await message.answer(
+            "Введите номер транспортного средства\n"
+            "Bitte geben Sie die Fahrzeug-Nr. ein:"
+        )
+        return
+
+    # --- Шаг 3: Номер ТС ---
+    if step == "fahrzeug":
+        user_data[user_id]["fahrzeug"] = text
+        user_data[user_id]["step"] = "ersatzteile"
+        await message.answer(
+            "Были ли использованы запасные части?\n"
+            "Wurden Ersatzteile verwendet?",
+            reply_markup=yes_no_kb
+        )
+        return
+
+    # --- Шаг 4: Запчасти ---
+    if step == "ersatzteile":
+        if "ja" in text.lower() or "да" in text.lower():
+            user_data[user_id]["ersatzteile"] = "Ja"
+        else:
+            user_data[user_id]["ersatzteile"] = "Nein"
+        user_data[user_id]["step"] = "verbrauch"
+        await message.answer(
+            "Были ли использованы расходные материалы?\n"
+            "Wurde Verbrauchsmaterial verwendet?",
+            reply_markup=yes_no_kb
+        )
+        return
+
+    # --- Шаг 5: Расходники ---
+    if step == "verbrauch":
+        if "ja" in text.lower() or "да" in text.lower():
+            user_data[user_id]["verbrauch"] = "Ja"
+        else:
+            user_data[user_id]["verbrauch"] = "Nein"
+        user_data[user_id]["step"] = "zeit"
+        await message.answer(
+            "Введите затраченное время в часах (например: 1.5)\n"
+            "Bitte geben Sie den Zeitaufwand in Stunden ein (z.B. 1.5):",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    # --- Шаг 6: Время ---
+    if step == "zeit":
+        user_data[user_id]["zeit"] = text.replace(",", ".")
+        user_data[user_id]["step"] = "voice"
+        await message.answer(
+            "Теперь отправьте голосовое сообщение с описанием выполненных работ.\n"
+            "Senden Sie jetzt eine Sprachnachricht mit der Arbeitsbeschreibung."
+        )
+        return
+
+    # --- Подтверждение ---
+    if step == "confirm":
+        if text.lower() in ["да", "yes", "ja", "верно", "ок", "ok"]:
             try:
                 sheet = get_sheet()
-                data = user_data[user_id]["pending"]
+                data = user_data[user_id]
                 sheet.append_row([
                     data["mechaniker"],
                     data["datum"],
@@ -76,97 +154,65 @@ async def handle_text(message: Message):
                     data["verbrauch"],
                     data["zeit"]
                 ])
-                await message.answer("✅ Запись успешно добавлена в таблицу!")
+                await message.answer("✅ Запись успешно добавлена в таблицу!\n\nЧтобы сделать новую запись — нажмите /start или /new")
             except Exception as e:
-                await message.answer(f"Ошибка при записи: {e}")
-            user_data[user_id]["step"] = "ready"
-            user_data[user_id].pop("pending", None)
+                await message.answer(f"Ошибка при записи в таблицу: {e}")
+            user_data.pop(user_id, None)
         else:
-            await message.answer("Запись отменена. Отправьте новое голосовое сообщение.")
-            user_data[user_id]["step"] = "ready"
+            await message.answer("Запись отменена. Нажмите /start чтобы начать заново.")
+            user_data.pop(user_id, None)
         return
 
 @dp.message(F.voice)
 async def handle_voice(message: Message):
     user_id = message.from_user.id
-    if user_id not in user_data or user_data[user_id].get("step") != "ready":
-        await message.answer("Сначала нажмите /start и укажите своё имя.")
+
+    if user_id not in user_data or user_data[user_id].get("step") != "voice":
+        await message.answer("Сначала заполните все поля. Нажмите /start")
         return
 
-    await message.answer("Слушаю... Обрабатываю голосовое сообщение.")
+    await message.answer("Слушаю и обрабатываю голосовое сообщение...")
 
-    # Скачиваем голосовое
-    file = await bot.get_file(message.voice.file_id)
-    file_path = file.file_path
-    voice_bytes = await bot.download_file(file_path)
-
-    # Распознаём речь через Groq Whisper
     try:
+        file = await bot.get_file(message.voice.file_id)
+        voice_bytes = await bot.download_file(file.file_path)
+
+        # Распознавание речи
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.ogg", voice_bytes.read()),
             model="whisper-large-v3",
             language="ru"
         )
-        text = transcription.text
-    except Exception as e:
-        await message.answer(f"Не удалось распознать речь: {e}")
-        return
+        raw_text = transcription.text
 
-    # Отправляем в LLM для извлечения данных
-    prompt = f"""
-Ты помощник автомастерской в Германии.
-Из русского текста извлеки данные и верни ТОЛЬКО валидный JSON без пояснений:
+        # Перевод на технический немецкий
+        prompt = f"""
+Ты — помощник немецкой автомастерской.
+Переведи описание работ механика на правильный технический немецкий язык (KFZ-Fachsprache).
+Ответ должен быть только переводом, без пояснений и кавычек.
 
-{{
-  "mechaniker": "имя механика (оставь как есть)",
-  "datum": "дата в формате ДД.ММ.ГГГГ (если не указана — сегодня {datetime.now().strftime('%d.%m.%Y')})",
-  "fahrzeug": "номер автомобиля",
-  "beschreibung": "описание работ на правильном техническом немецком (KFZ)",
-  "ersatzteile": "Ja или Nein",
-  "verbrauch": "Ja или Nein",
-  "zeit": "время в часах числом (например 1.5)"
-}}
-
-Текст механика: {text}
-Имя механика: {user_data[user_id].get('name', '')}
+Текст механика: {raw_text}
 """
 
-    try:
         completion = groq_client.chat.completions.create(
             model="openai/gpt-oss-20b",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1
         )
-        response_text = completion.choices[0].message.content.strip()
-        # Убираем возможные ```json
-        if response_text.startswith("```"):
-            response_text = response_text.split("```")[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-        data = json.loads(response_text)
-    except Exception as e:
-        await message.answer(f"Ошибка обработки: {e}\nРаспознанный текст: {text}")
-        return
+        beschreibung = completion.choices[0].message.content.strip()
 
-    # Показываем подтверждение
-    confirm_text = (
-        f"Проверьте данные:\n\n"
-        f"Mechaniker: {data.get('mechaniker')}\n"
-        f"Datum: {data.get('datum')}\n"
-        f"Fahrzeug-Nr.: {data.get('fahrzeug')}\n"
-        f"Arbeitsbeschreibung: {data.get('beschreibung')}\n"
-        f"Ersatzteile: {data.get('ersatzteile')}\n"
-        f"Verbrauchsmaterial: {data.get('verbrauch')}\n"
-        f"Zeitaufwand: {data.get('zeit')} h\n\n"
-        f"Всё верно? Напишите «Да» или «Нет»"
-    )
-    user_data[user_id]["pending"] = data
-    user_data[user_id]["step"] = "confirm"
-    await message.answer(confirm_text)
+        user_data[user_id]["beschreibung"] = beschreibung
+        user_data[user_id]["step"] = "confirm"
 
-async def main():
-    print("Бот запущен...")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        data = user_data[user_id]
+        confirm_text = (
+            f"Проверьте данные / Bitte prüfen:\n\n"
+            f"Mechaniker: {data['mechaniker']}\n"
+            f"Datum: {data['datum']}\n"
+            f"Fahrzeug-Nr.: {data['fahrzeug']}\n"
+            f"Arbeitsbeschreibung: {beschreibung}\n"
+            f"Ersatzteile: {data['ersatzteile']}\n"
+            f"Verbrauchsmaterial: {data['verbrauch']}\n"
+            f"Zeitaufwand: {data['zeit']} h\n\n"
+            f"Всё верно? Напишите «Да» или «Нет»\n"
+            f"Alles korrekt? Schreiben Sie «Ja» oder 
