@@ -31,9 +31,7 @@ def get_sheet():
     return client.open(SHEET_NAME).sheet1
 
 yes_no_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]
-    ],
+    keyboard=[[KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]],
     resize_keyboard=True
 )
 
@@ -42,8 +40,7 @@ async def cmd_start(message: Message):
     user_id = message.from_user.id
     user_data[user_id] = {"step": "mechaniker"}
     await message.answer(
-        "Введите Ваше Имя и Фамилию\n"
-        "Bitte geben Sie Ihren Vor- und Nachnamen ein:",
+        "Введите Ваше Имя и Фамилию\nBitte geben Sie Ihren Vor- und Nachnamen ein:",
         reply_markup=ReplyKeyboardRemove()
     )
 
@@ -66,10 +63,8 @@ async def handle_text(message: Message):
         user_data[user_id]["mechaniker"] = text
         user_data[user_id]["step"] = "datum"
         await message.answer(
-            "Введите дату выполненных работ (ДД.ММ.ГГГГ)\n"
-            "или напишите сегодня\n\n"
-            "Bitte geben Sie das Datum ein (TT.MM.JJJJ)\n"
-            "oder schreiben Sie heute:"
+            "Введите дату выполненных работ (ДД.ММ.ГГГГ) или напишите сегодня\n"
+            "Bitte geben Sie das Datum ein (TT.MM.JJJJ) oder schreiben Sie heute:"
         )
         return
 
@@ -81,8 +76,7 @@ async def handle_text(message: Message):
         user_data[user_id]["datum"] = date_str
         user_data[user_id]["step"] = "fahrzeug"
         await message.answer(
-            "Введите номер транспортного средства\n"
-            "Bitte geben Sie die Fahrzeug-Nr. ein:"
+            "Введите номер транспортного средства\nBitte geben Sie die Fahrzeug-Nr. ein:"
         )
         return
 
@@ -90,8 +84,7 @@ async def handle_text(message: Message):
         user_data[user_id]["fahrzeug"] = text
         user_data[user_id]["step"] = "ersatzteile"
         await message.answer(
-            "Были ли использованы запасные части?\n"
-            "Wurden Ersatzteile verwendet?",
+            "Были ли использованы запасные части?\nWurden Ersatzteile verwendet?",
             reply_markup=yes_no_kb
         )
         return
@@ -103,8 +96,7 @@ async def handle_text(message: Message):
             user_data[user_id]["ersatzteile"] = "Nein"
         user_data[user_id]["step"] = "verbrauch"
         await message.answer(
-            "Были ли использованы расходные материалы?\n"
-            "Wurde Verbrauchsmaterial verwendet?",
+            "Были ли использованы расходные материалы?\nWurde Verbrauchsmaterial verwendet?",
             reply_markup=yes_no_kb
         )
         return
@@ -146,7 +138,7 @@ async def handle_text(message: Message):
                     data["zeit"]
                 ])
                 await message.answer(
-                    "Запись успешно добавлена в таблицу!\n\n"
+                    "Запись успешно добавлена в таблицу!\n"
                     "Чтобы сделать новую запись — нажмите /start или /new"
                 )
             except Exception as e:
@@ -169,6 +161,53 @@ async def handle_voice(message: Message):
 
     try:
         file = await bot.get_file(message.voice.file_id)
-        voice_bytes = await bot.download_file(file.file_path)
+        voice_file = await bot.download_file(file.file_path)
 
         transcription = groq_client.audio.transcriptions.create(
+            file=("voice.ogg", voice_file.read()),
+            model="whisper-large-v3",
+            language="ru"
+        )
+        raw_text = transcription.text
+
+        prompt = (
+            "Ты помощник немецкой автомастерской. "
+            "Переведи описание работ механика на правильный технический немецкий язык (KFZ). "
+            "Ответ должен быть только переводом, без пояснений.\n\n"
+            f"Текст механика: {raw_text}"
+        )
+
+        completion = groq_client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1
+        )
+        beschreibung = completion.choices[0].message.content.strip()
+
+        user_data[user_id]["beschreibung"] = beschreibung
+        user_data[user_id]["step"] = "confirm"
+
+        data = user_data[user_id]
+        confirm_text = (
+            "Проверьте данные / Bitte pruefen:\n\n"
+            f"Mechaniker: {data['mechaniker']}\n"
+            f"Datum: {data['datum']}\n"
+            f"Fahrzeug-Nr.: {data['fahrzeug']}\n"
+            f"Arbeitsbeschreibung: {beschreibung}\n"
+            f"Ersatzteile: {data['ersatzteile']}\n"
+            f"Verbrauchsmaterial: {data['verbrauch']}\n"
+            f"Zeitaufwand: {data['zeit']} h\n\n"
+            "Всё верно? Напишите Да или Нет\n"
+            "Alles korrekt? Schreiben Sie Ja oder Nein"
+        )
+        await message.answer(confirm_text)
+
+    except Exception as e:
+        await message.answer(f"Ошибка обработки голоса: {e}")
+
+async def main():
+    print("Бот запущен...")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
