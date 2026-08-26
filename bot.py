@@ -18,7 +18,6 @@ bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-# Временное хранилище данных пользователей
 user_data = {}
 
 def get_sheet():
@@ -31,7 +30,6 @@ def get_sheet():
     client = gspread.authorize(creds)
     return client.open(SHEET_NAME).sheet1
 
-# Клавиатура Да/Нет
 yes_no_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]
@@ -64,21 +62,19 @@ async def handle_text(message: Message):
 
     step = user_data[user_id].get("step")
 
-    # --- Шаг 1: Имя ---
     if step == "mechaniker":
         user_data[user_id]["mechaniker"] = text
         user_data[user_id]["step"] = "datum"
         await message.answer(
             "Введите дату выполненных работ (ДД.ММ.ГГГГ)\n"
-            "или напишите «сегодня»\n\n"
+            "или напишите сегодня\n\n"
             "Bitte geben Sie das Datum ein (TT.MM.JJJJ)\n"
-            "oder schreiben Sie «heute»:"
+            "oder schreiben Sie heute:"
         )
         return
 
-    # --- Шаг 2: Дата ---
     if step == "datum":
-        if text.lower() in ["сегодня", "heute", "сегодняшняя", "today"]:
+        if text.lower() in ["сегодня", "heute", "today"]:
             date_str = datetime.now().strftime("%d.%m.%Y")
         else:
             date_str = text
@@ -90,7 +86,6 @@ async def handle_text(message: Message):
         )
         return
 
-    # --- Шаг 3: Номер ТС ---
     if step == "fahrzeug":
         user_data[user_id]["fahrzeug"] = text
         user_data[user_id]["step"] = "ersatzteile"
@@ -101,7 +96,6 @@ async def handle_text(message: Message):
         )
         return
 
-    # --- Шаг 4: Запчасти ---
     if step == "ersatzteile":
         if "ja" in text.lower() or "да" in text.lower():
             user_data[user_id]["ersatzteile"] = "Ja"
@@ -115,7 +109,6 @@ async def handle_text(message: Message):
         )
         return
 
-    # --- Шаг 5: Расходники ---
     if step == "verbrauch":
         if "ja" in text.lower() or "да" in text.lower():
             user_data[user_id]["verbrauch"] = "Ja"
@@ -123,13 +116,12 @@ async def handle_text(message: Message):
             user_data[user_id]["verbrauch"] = "Nein"
         user_data[user_id]["step"] = "zeit"
         await message.answer(
-            "Введите затраченное время в часах (например: 1.5)\n"
+            "Введите затраченное время в часах (например 1.5)\n"
             "Bitte geben Sie den Zeitaufwand in Stunden ein (z.B. 1.5):",
             reply_markup=ReplyKeyboardRemove()
         )
         return
 
-    # --- Шаг 6: Время ---
     if step == "zeit":
         user_data[user_id]["zeit"] = text.replace(",", ".")
         user_data[user_id]["step"] = "voice"
@@ -139,7 +131,6 @@ async def handle_text(message: Message):
         )
         return
 
-    # --- Подтверждение ---
     if step == "confirm":
         if text.lower() in ["да", "yes", "ja", "верно", "ок", "ok"]:
             try:
@@ -154,7 +145,10 @@ async def handle_text(message: Message):
                     data["verbrauch"],
                     data["zeit"]
                 ])
-                await message.answer("✅ Запись успешно добавлена в таблицу!\n\nЧтобы сделать новую запись — нажмите /start или /new")
+                await message.answer(
+                    "Запись успешно добавлена в таблицу!\n\n"
+                    "Чтобы сделать новую запись — нажмите /start или /new"
+                )
             except Exception as e:
                 await message.answer(f"Ошибка при записи в таблицу: {e}")
             user_data.pop(user_id, None)
@@ -177,43 +171,4 @@ async def handle_voice(message: Message):
         file = await bot.get_file(message.voice.file_id)
         voice_bytes = await bot.download_file(file.file_path)
 
-        # Распознавание речи
         transcription = groq_client.audio.transcriptions.create(
-            file=("voice.ogg", voice_bytes.read()),
-            model="whisper-large-v3",
-            language="ru"
-        )
-        raw_text = transcription.text
-
-        # Перевод на технический немецкий
-        prompt = f"""
-Ты — помощник немецкой автомастерской.
-Переведи описание работ механика на правильный технический немецкий язык (KFZ-Fachsprache).
-Ответ должен быть только переводом, без пояснений и кавычек.
-
-Текст механика: {raw_text}
-"""
-
-        completion = groq_client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1
-        )
-        beschreibung = completion.choices[0].message.content.strip()
-
-        user_data[user_id]["beschreibung"] = beschreibung
-        user_data[user_id]["step"] = "confirm"
-
-        data = user_data[user_id]
-                confirm_text = (
-            "Проверьте данные / Bitte pruefen:\n\n"
-            f"Mechaniker: {data['mechaniker']}\n"
-            f"Datum: {data['datum']}\n"
-            f"Fahrzeug-Nr.: {data['fahrzeug']}\n"
-            f"Arbeitsbeschreibung: {beschreibung}\n"
-            f"Ersatzteile: {data['ersatzteile']}\n"
-            f"Verbrauchsmaterial: {data['verbrauch']}\n"
-            f"Zeitaufwand: {data['zeit']} h\n\n"
-            "Всё верно? Напишите Да или Нет\n"
-            "Alles korrekt? Schreiben Sie Ja oder Nein"
-        )
