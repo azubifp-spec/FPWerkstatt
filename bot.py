@@ -205,8 +205,8 @@ async def handle_voice(message: Message):
         user_data[user_id]["step"] = "confirm"
 
         data = user_data[user_id]
-        confirm_text = (
-            f"Проверьте данные / Bitte prüfen:\n\n"
+                confirm_text = (
+            "Проверьте данные / Bitte pruefen:\n\n"
             f"Mechaniker: {data['mechaniker']}\n"
             f"Datum: {data['datum']}\n"
             f"Fahrzeug-Nr.: {data['fahrzeug']}\n"
@@ -214,5 +214,6 @@ async def handle_voice(message: Message):
             f"Ersatzteile: {data['ersatzteile']}\n"
             f"Verbrauchsmaterial: {data['verbrauch']}\n"
             f"Zeitaufwand: {data['zeit']} h\n\n"
-            f"Всё верно? Напишите «Да» или «Нет»\n"
-            f"Alles korrekt? Schreiben Sie «Ja» oder 
+            "Всё верно? Напишите Да или Нет\n"
+            "Alles korrekt? Schreiben Sie Ja oder Nein"
+        )
