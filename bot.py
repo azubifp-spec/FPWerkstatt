@@ -12,6 +12,10 @@ import google.generativeai as genai
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
+SHEET_NAME = os.getenv("SHEET_NAME", "Учёт работ автомастерской")
+
+# Загрузка ключа Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not GEMINI_API_KEY:
@@ -21,6 +25,10 @@ else:
 
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+
+bot = Bot(token=TELEGRAM_TOKEN)
+dp = Dispatcher()
+groq_client = Groq(api_key=GROQ_API_KEY)
 
 user_data = {}
 
@@ -194,7 +202,7 @@ async def handle_voice(message: Message):
         file = await bot.get_file(message.voice.file_id)
         voice_file = await bot.download_file(file.file_path)
 
-        # Распознавание речи (Groq Whisper)
+        # Распознавание речи (Groq)
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.ogg", voice_file.read()),
             model="whisper-large-v3",
