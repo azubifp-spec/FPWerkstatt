@@ -31,7 +31,18 @@ def get_sheet():
     return client.open(SHEET_NAME).sheet1
 
 yes_no_kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]],
+    keyboard=[
+        [KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]
+    ],
+    resize_keyboard=True
+)
+
+confirm_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Да / Ja")],
+        [KeyboardButton(text="Заново описать работу голосом")],
+        [KeyboardButton(text="Отменить всю запись")]
+    ],
     resize_keyboard=True
 )
 
@@ -40,7 +51,8 @@ async def cmd_start(message: Message):
     user_id = message.from_user.id
     user_data[user_id] = {"step": "mechaniker"}
     await message.answer(
-        "Введите Ваше Имя и Фамилию\nBitte geben Sie Ihren Vor- und Nachnamen ein:",
+        "Введите Ваше Имя и Фамилию\n"
+        "Bitte geben Sie Ihren Vor- und Nachnamen ein:",
         reply_markup=ReplyKeyboardRemove()
     )
 
@@ -63,8 +75,10 @@ async def handle_text(message: Message):
         user_data[user_id]["mechaniker"] = text
         user_data[user_id]["step"] = "datum"
         await message.answer(
-            "Введите дату выполненных работ (ДД.ММ.ГГГГ) или напишите сегодня\n"
-            "Bitte geben Sie das Datum ein (TT.MM.JJJJ) oder schreiben Sie heute:"
+            "Введите дату выполненных работ (ДД.ММ.ГГГГ)\n"
+            "или напишите сегодня\n\n"
+            "Bitte geben Sie das Datum ein (TT.MM.JJJJ)\n"
+            "oder schreiben Sie heute:"
         )
         return
 
@@ -76,7 +90,8 @@ async def handle_text(message: Message):
         user_data[user_id]["datum"] = date_str
         user_data[user_id]["step"] = "fahrzeug"
         await message.answer(
-            "Введите номер транспортного средства\nBitte geben Sie die Fahrzeug-Nr. ein:"
+            "Введите номер транспортного средства\n"
+            "Bitte geben Sie die Fahrzeug-Nr. ein:"
         )
         return
 
@@ -84,7 +99,8 @@ async def handle_text(message: Message):
         user_data[user_id]["fahrzeug"] = text
         user_data[user_id]["step"] = "ersatzteile"
         await message.answer(
-            "Были ли использованы запасные части?\nWurden Ersatzteile verwendet?",
+            "Были ли использованы запасные части?\n"
+            "Wurden Ersatzteile verwendet?",
             reply_markup=yes_no_kb
         )
         return
@@ -96,7 +112,8 @@ async def handle_text(message: Message):
             user_data[user_id]["ersatzteile"] = "Nein"
         user_data[user_id]["step"] = "verbrauch"
         await message.answer(
-            "Были ли использованы расходные материалы?\nWurde Verbrauchsmaterial verwendet?",
+            "Были ли использованы расходные материалы?\n"
+            "Wurde Verbrauchsmaterial verwendet?",
             reply_markup=yes_no_kb
         )
         return
@@ -124,7 +141,9 @@ async def handle_text(message: Message):
         return
 
     if step == "confirm":
-        if text.lower() in ["да", "yes", "ja", "верно", "ок", "ok"]:
+        lower_text = text.lower()
+
+        if lower_text in ["да", "yes", "ja", "верно", "ок", "ok"]:
             try:
                 sheet = get_sheet()
                 data = user_data[user_id]
@@ -138,15 +157,36 @@ async def handle_text(message: Message):
                     data["zeit"]
                 ])
                 await message.answer(
-                    "Запись успешно добавлена в таблицу!\n"
+                    "Запись успешно добавлена в таблицу!\n\n"
                     "Чтобы сделать новую запись — нажмите /start или /new"
                 )
             except Exception as e:
                 await message.answer(f"Ошибка при записи в таблицу: {e}")
             user_data.pop(user_id, None)
-        else:
-            await message.answer("Запись отменена. Нажмите /start чтобы начать заново.")
+            return
+
+        if "заново" in lower_text or "голос" in lower_text or "описать" in lower_text:
+            user_data[user_id]["step"] = "voice"
+            await message.answer(
+                "Отправьте новое голосовое сообщение с описанием работ.\n"
+                "Senden Sie eine neue Sprachnachricht mit der Arbeitsbeschreibung."
+            )
+            return
+
+        if "отмен" in lower_text or "cancel" in lower_text or "нет" in lower_text or "nein" in lower_text:
+            await message.answer(
+                "Вся запись отменена.\n"
+                "Чтобы начать заново — нажмите /start или /new"
+            )
             user_data.pop(user_id, None)
+            return
+
+        await message.answer(
+            "Пожалуйста, выберите:\n"
+            "Да / Ja — сохранить\n"
+            "Заново описать работу голосом — повторить только описание\n"
+            "Отменить всю запись — отменить всё"
+        )
         return
 
 @dp.message(F.voice)
@@ -170,22 +210,20 @@ async def handle_voice(message: Message):
         )
         raw_text = transcription.text
 
-prompt = (
-            "Ты — опытный переводчик технической документации немецкой автомастерской (KFZ / Nutzfahrzeuge).\n"
-            "Твоя задача: перевести описание работ механика на правильный технический немецкий язык.\n\n"
+        prompt = (
+            "Ты помощник немецкой автомастерской (KFZ / Nutzfahrzeuge).\n"
+            "Переведи описание работ механика на правильный технический немецкий язык.\n\n"
             "Правила:\n"
-            "- Отвечай ТОЛЬКО переводом, без пояснений, кавычек и лишнего текста.\n"
+            "- Отвечай ТОЛЬКО переводом, без пояснений и кавычек.\n"
             "- Используй стандартные термины немецкой автомеханики.\n"
-            "- Если термин редкий — используй наиболее точный профессиональный вариант.\n"
-            "- Никогда не оставляй ответ пустым. Если не уверен — дай лучший возможный перевод.\n\n"
-            "Примеры правильных переводов:\n"
+            "- Никогда не оставляй ответ пустым.\n\n"
+            "Примеры:\n"
             "замена пневмоподушки → Austausch der Luftfeder (Luftfederbalg)\n"
-            "замена передних тормозных колодок → Austausch der vorderen Bremsbeläge\n"
+            "замена передних колодок → Austausch der vorderen Bremsbeläge\n"
             "замена масла и фильтра → Motoröl- und Filterwechsel\n"
-            "ремонт пневмоподвески → Reparatur der Luftfederung\n"
-            "диагностика ходовой → Fahrwerksdiagnose\n\n"
+            "ремонт пневмоподвески → Reparatur der Luftfederung\n\n"
             f"Текст механика: {raw_text}"
-)
+        )
 
         completion = groq_client.chat.completions.create(
             model="openai/gpt-oss-20b",
@@ -193,6 +231,9 @@ prompt = (
             temperature=0.1
         )
         beschreibung = completion.choices[0].message.content.strip()
+
+        if not beschreibung:
+            beschreibung = raw_text + " (Übersetzung fehlgeschlagen)"
 
         user_data[user_id]["beschreibung"] = beschreibung
         user_data[user_id]["step"] = "confirm"
