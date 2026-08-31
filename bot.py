@@ -8,15 +8,19 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from groq import Groq
 import gspread
 from google.oauth2.service_account import Credentials
+import google.generativeai as genai
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SHEET_NAME = os.getenv("SHEET_NAME", "Учёт работ автомастерской")
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
 groq_client = Groq(api_key=GROQ_API_KEY)
+genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
 user_data = {}
 
@@ -31,18 +35,7 @@ def get_sheet():
     return client.open(SHEET_NAME).sheet1
 
 yes_no_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]
-    ],
-    resize_keyboard=True
-)
-
-confirm_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Да / Ja")],
-        [KeyboardButton(text="Заново описать работу голосом")],
-        [KeyboardButton(text="Отменить всю запись")]
-    ],
+    keyboard=[[KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]],
     resize_keyboard=True
 )
 
@@ -75,10 +68,8 @@ async def handle_text(message: Message):
         user_data[user_id]["mechaniker"] = text
         user_data[user_id]["step"] = "datum"
         await message.answer(
-            "Введите дату выполненных работ (ДД.ММ.ГГГГ)\n"
-            "или напишите сегодня\n\n"
-            "Bitte geben Sie das Datum ein (TT.MM.JJJJ)\n"
-            "oder schreiben Sie heute:"
+            "Введите дату выполненных работ (ДД.ММ.ГГГГ) или напишите сегодня\n"
+            "Bitte geben Sie das Datum ein (TT.MM.JJJJ) oder schreiben Sie heute:"
         )
         return
 
@@ -169,7 +160,7 @@ async def handle_text(message: Message):
             user_data[user_id]["step"] = "voice"
             await message.answer(
                 "Отправьте новое голосовое сообщение с описанием работ.\n"
-                "Senden Sie eine neue Sprachnachricht mit der Arbeitsbeschreibung."
+                "Senden Sie eine neue Sprachnachricht."
             )
             return
 
@@ -184,8 +175,8 @@ async def handle_text(message: Message):
         await message.answer(
             "Пожалуйста, выберите:\n"
             "Да / Ja — сохранить\n"
-            "Заново описать работу голосом — повторить только описание\n"
-            "Отменить всю запись — отменить всё"
+            "Заново описать работу голосом\n"
+            "Отменить всю запись"
         )
         return
 
@@ -197,12 +188,13 @@ async def handle_voice(message: Message):
         await message.answer("Сначала заполните все поля. Нажмите /start")
         return
 
-    await message.answer("Слушаю и обрабатываю голосовое сообщение...")
+    await message.answer("Слушаю и обрабатываю...")
 
     try:
         file = await bot.get_file(message.voice.file_id)
         voice_file = await bot.download_file(file.file_path)
 
+        # Распознавание речи (Groq Whisper)
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.ogg", voice_file.read()),
             model="whisper-large-v3",
@@ -210,30 +202,23 @@ async def handle_voice(message: Message):
         )
         raw_text = transcription.text
 
+        # Перевод через Gemini
         prompt = (
-            "Ты помощник немецкой автомастерской (KFZ / Nutzfahrzeuge).\n"
+            "Ты опытный переводчик технической документации немецкой автомастерской (KFZ / Nutzfahrzeuge / LKW).\n"
             "Переведи описание работ механика на правильный технический немецкий язык.\n\n"
             "Правила:\n"
-            "- Отвечай ТОЛЬКО переводом, без пояснений и кавычек.\n"
-            "- Используй стандартные термины немецкой автомеханики.\n"
+            "- Отвечай ТОЛЬКО переводом, без пояснений, кавычек и лишнего текста.\n"
+            "- Используй профессиональные термины немецкой автомеханики.\n"
+            "- Для пневмоподушки подвески грузовика используй: Austausch der Luftfeder (Luftfederbalg)\n"
             "- Никогда не оставляй ответ пустым.\n\n"
-            "Примеры:\n"
-            "замена пневмоподушки → Austausch der Luftfeder (Luftfederbalg)\n"
-            "замена передних колодок → Austausch der vorderen Bremsbeläge\n"
-            "замена масла и фильтра → Motoröl- und Filterwechsel\n"
-            "ремонт пневмоподвески → Reparatur der Luftfederung\n\n"
             f"Текст механика: {raw_text}"
         )
 
-        completion = groq_client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1
-        )
-        beschreibung = completion.choices[0].message.content.strip()
+        response = gemini_model.generate_content(prompt)
+        beschreibung = response.text.strip()
 
         if not beschreibung:
-            beschreibung = raw_text + " (Übersetzung fehlgeschlagen)"
+            beschreibung = raw_text
 
         user_data[user_id]["beschreibung"] = beschreibung
         user_data[user_id]["step"] = "confirm"
@@ -254,7 +239,7 @@ async def handle_voice(message: Message):
         await message.answer(confirm_text)
 
     except Exception as e:
-        await message.answer(f"Ошибка обработки голоса: {e}")
+        await message.answer(f"Ошибка обработки: {e}")
 
 async def main():
     print("Бот запущен...")
