@@ -15,7 +15,6 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SHEET_NAME = os.getenv("SHEET_NAME", "Учёт работ автомастерской")
 
-# Ключ Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not GEMINI_API_KEY:
@@ -201,7 +200,6 @@ async def handle_voice(message: Message):
         file = await bot.get_file(message.voice.file_id)
         voice_file = await bot.download_file(file.file_path)
 
-        # Распознавание речи
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.ogg", voice_file.read()),
             model="whisper-large-v3",
@@ -209,7 +207,6 @@ async def handle_voice(message: Message):
         )
         raw_text = transcription.text
 
-        # Перевод через Gemini (новая библиотека)
         prompt = (
             "Ты опытный переводчик технической документации немецкой автомастерской (KFZ / Nutzfahrzeuge / LKW).\n"
             "Переведи описание работ механика на правильный технический немецкий язык.\n\n"
@@ -234,5 +231,26 @@ async def handle_voice(message: Message):
         user_data[user_id]["step"] = "confirm"
 
         data = user_data[user_id]
-        confirm_text = (
-            "Проверьте данные / Bitte 
+
+        confirm_text = "Проверьте данные / Bitte pruefen:\n\n"
+        confirm_text += f"Mechaniker: {data['mechaniker']}\n"
+        confirm_text += f"Datum: {data['datum']}\n"
+        confirm_text += f"Fahrzeug-Nr.: {data['fahrzeug']}\n"
+        confirm_text += f"Arbeitsbeschreibung: {beschreibung}\n"
+        confirm_text += f"Ersatzteile: {data['ersatzteile']}\n"
+        confirm_text += f"Verbrauchsmaterial: {data['verbrauch']}\n"
+        confirm_text += f"Zeitaufwand: {data['zeit']} h\n\n"
+        confirm_text += "Всё верно? Напишите Да или Нет\n"
+        confirm_text += "Alles korrekt? Schreiben Sie Ja oder Nein"
+
+        await message.answer(confirm_text)
+
+    except Exception as e:
+        await message.answer(f"Ошибка обработки: {e}")
+
+async def main():
+    print("Бот запущен...")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
