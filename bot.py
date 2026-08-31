@@ -8,14 +8,14 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 from groq import Groq
 import gspread
 from google.oauth2.service_account import Credentials
-import google.generativeai as genai
+from google import genai
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SHEET_NAME = os.getenv("SHEET_NAME", "Учёт работ автомастерской")
 
-# Загрузка ключа Gemini
+# Ключ Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 if not GEMINI_API_KEY:
@@ -23,8 +23,7 @@ if not GEMINI_API_KEY:
 else:
     print("Gemini ключ успешно загружен")
 
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
@@ -39,8 +38,8 @@ def get_sheet():
         "https://www.googleapis.com/auth/drive"
     ]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-    return client.open(SHEET_NAME).sheet1
+    gs = gspread.authorize(creds)
+    return gs.open(SHEET_NAME).sheet1
 
 yes_no_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Ja / Да"), KeyboardButton(text="Nein / Нет")]],
@@ -202,7 +201,7 @@ async def handle_voice(message: Message):
         file = await bot.get_file(message.voice.file_id)
         voice_file = await bot.download_file(file.file_path)
 
-        # Распознавание речи (Groq)
+        # Распознавание речи
         transcription = groq_client.audio.transcriptions.create(
             file=("voice.ogg", voice_file.read()),
             model="whisper-large-v3",
@@ -210,7 +209,7 @@ async def handle_voice(message: Message):
         )
         raw_text = transcription.text
 
-        # Перевод через Gemini
+        # Перевод через Gemini (новая библиотека)
         prompt = (
             "Ты опытный переводчик технической документации немецкой автомастерской (KFZ / Nutzfahrzeuge / LKW).\n"
             "Переведи описание работ механика на правильный технический немецкий язык.\n\n"
@@ -222,7 +221,10 @@ async def handle_voice(message: Message):
             f"Текст механика: {raw_text}"
         )
 
-        response = gemini_model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
         beschreibung = response.text.strip()
 
         if not beschreibung:
@@ -233,25 +235,4 @@ async def handle_voice(message: Message):
 
         data = user_data[user_id]
         confirm_text = (
-            "Проверьте данные / Bitte pruefen:\n\n"
-            f"Mechaniker: {data['mechaniker']}\n"
-            f"Datum: {data['datum']}\n"
-            f"Fahrzeug-Nr.: {data['fahrzeug']}\n"
-            f"Arbeitsbeschreibung: {beschreibung}\n"
-            f"Ersatzteile: {data['ersatzteile']}\n"
-            f"Verbrauchsmaterial: {data['verbrauch']}\n"
-            f"Zeitaufwand: {data['zeit']} h\n\n"
-            "Всё верно? Напишите Да или Нет\n"
-            "Alles korrekt? Schreiben Sie Ja oder Nein"
-        )
-        await message.answer(confirm_text)
-
-    except Exception as e:
-        await message.answer(f"Ошибка обработки: {e}")
-
-async def main():
-    print("Бот запущен...")
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            "Проверьте данные / Bitte 
