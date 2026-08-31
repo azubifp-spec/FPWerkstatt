@@ -12,13 +12,13 @@ import google.generativeai as genai
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
-SHEET_NAME = os.getenv("SHEET_NAME", "Учёт работ автомастерской")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
-bot = Bot(token=TELEGRAM_TOKEN)
-dp = Dispatcher()
-groq_client = Groq(api_key=GROQ_API_KEY)
+if not GEMINI_API_KEY:
+    print("ОШИБКА: Не найден ключ GEMINI_API_KEY или GOOGLE_API_KEY")
+else:
+    print("Gemini ключ успешно загружен")
+
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
